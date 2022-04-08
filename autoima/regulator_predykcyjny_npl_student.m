@@ -7,7 +7,7 @@ clear all;
 %sterowania, parametry psi oraz lambda (pamiętajmy, że są to macierze)
 %; ograniczenia na sterowanie i przyrosty sterowań. 
 N = 30;
-Nu = 5;
+Nu = 3;
 ny = 3;
 nx = 3;
 nu = 2;
@@ -32,14 +32,20 @@ tmax_odcinek = Tp;
 % (zastosować interpolację).
 
 
-[yzad_1, yzad_2, yzad_3]=y_zadane();
-%[yzad_1, yzad_2, yzad_3] = crop_data(importdata("ima_difficult_trajectory.txt"));
+%y_zad=y_zadane();
 
-load utest1.mat
-kmax = 500-Nu+1;
+y_zad=get_trajectory();
 
+
+% y_zad = crop_data(importdata("ima_difficult_trajectory.txt"));
+
+
+kmax = length(y_zad)-N; %uzale�nienie d�ugo�ci od d�ugo�ci pliku
+x_est = zeros(3, kmax);
 xk=zeros(3,kmax+N);
-uk=utest1(:,1:kmax+Nu-1);
+
+% uk=y_trajectory(:,1:kmax+Nu-1); %uzale�nienie od pliku
+uk = zeros(2, kmax);
 yk=zeros(3,kmax+N);
 
 tk=(0:kmax-1)*Tp;
@@ -62,7 +68,7 @@ for k = kmin:kmax
     yk(:,k)=xk(:,k);
     
    %% TODO - zaimplementować rozszerzony  filtr kalmana
-    x_est = zeros(3, kmax);
+
     [A B C] = linearize_kalman(x_est(:,k-1), uk(:,k-1),R,L,Tp);
     x_est_prev = simulate_proces(x_est, uk, k, Tp, R, L);
     P_prev = A * Pm * A'  + Qm;
@@ -72,7 +78,7 @@ for k = kmin:kmax
     x_est(:, k) = x_est_prev + K * y_est;
     Pm = (diag([1 1 1]) * K * C) * P_prev;
    %% TODO - zlinearyzować model dyskretny z wykorzystaniem stanu mierzonego
-%     [A B C] = linearize_kalman(x(:,k), u(:,k-1),R,L,Tp);
+%     [A B C] = linearize_kalman(x(:,k), uk(:,k-1),R,L,Tp);
  
    %% TODO - zlinearyzować model dyskretny z wykorzystaniem stanu estymnowanego
     [A B C] = linearize_kalman(x_est(:,k), uk(:,k-1),R,L,Tp);
@@ -94,10 +100,9 @@ for k = kmin:kmax
 
 
    %% TODO - wyznaczyć trajektorię swobodną y0 
-    y_zad = [yzad_1,yzad_2,yzad_3];
-   
     y_zad_v = get_yzad(k, y_zad, N, nx);
     y_0_v = get_y0_v(N, ny, x_est, uk, Tp, R, L, k);
+
    %% TODO - wyznaczyć wartości zadane na horyzoncie N 
     M = get_M_matrix(A, B, nx, nu, Nu, N);
     C_dash = diag(ones(1, N*nx));
@@ -105,12 +110,16 @@ for k = kmin:kmax
     K_r = K_r(1:nu, :);
  
    %% TODO - prawo sterowania
-
     dU_v = K_r * (y_zad_v - y_0_v);
-    u(:, k) = uk(:, k-1) + dU_v;
+    uk(:, k) = uk(:, k-1) + dU_v;
    %% TODO - narzucić ograniczenia na przyrosty sterowania i 
    % wartości sterowania
-    
+   if uk(1,k)<-10
+       uk(1,k) = -10;
+   end
+   if uk(2,k)<-10
+       uk(2,k) = -10;
+   end
 end
 
 %% TODO wyznaczyc błąd średniokwadratowy
@@ -128,14 +137,14 @@ end
 figure
 plot(x(1, :), x(2, :), 'LineWidth', 1.5);
 hold on;
-plot(x_est(1, :), x_est(2, :), '--','LineWidth', 1.5);
+plot(x_est(1, :), x_est(2, :), 'o','LineWidth', 1.5);
 plot(y_zad(1, :), y_zad(2, :), '--', 'LineWidth', 1.5);
 grid on;
 
 figure;
-plot(u(1, :))
+plot(uk(1, :))
 hold on;
-plot(u(2, :), '--')
+plot(uk(2, :), '--')
 
 %% Funkcje - dobrze jest długie, bądź też często powtarzające się
 % fragmenty kodu zawrzeć w funkcjach
