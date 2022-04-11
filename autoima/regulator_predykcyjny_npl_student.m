@@ -1,7 +1,11 @@
 clear all;
 %najprzydaniejsza funkcja: help
-%przydatne funkcje: kron, eye, size, length, cell2mat, str2double, interp1, drawnow
+%przydatne funkcje: kron, eye, size, length, cell2mat, str2double, interp1,
+%drawnow , strcmp
 
+
+%typ = "estymowany";
+typ = "mierzony";
 
 %% TODO - Zadeklarować nastawy regulatora NPL, horyzonty predykcji i
 %sterowania, parametry psi oraz lambda (pamiętajmy, że są to macierze)
@@ -32,15 +36,19 @@ tmax_odcinek = Tp;
 % (zastosować interpolację).
 
 
+
 %y_zad=y_zadane();
 
 y_zad=get_trajectory();
 
-
+ 
 % y_zad = crop_data(importdata("ima_difficult_trajectory.txt"));
+% y_zad = interpol_own(y_zad,120);
 
+kmax = length(y_zad); %uzale�nienie d�ugo�ci od d�ugo�ci pliku
 
-kmax = length(y_zad)-N; %uzale�nienie d�ugo�ci od d�ugo�ci pliku
+y_zad(:,end:end+N) = repmat(y_zad(:, end), 1, N+1);
+
 x_est = zeros(3, kmax);
 xk=zeros(3,kmax+N);
 
@@ -75,25 +83,41 @@ for k = kmin:kmax
     y_est = yk(:, k) - C * x_est_prev;
     S = C * P_prev * C' + Rm;
     K = P_prev * C' * inv(S);
-    x_est(:, k) = x_est_prev + K * y_est;
-    Pm = (diag([1 1 1]) * K * C) * P_prev;
+    x_est(:, k) = 1*(x_est_prev + K * y_est);
+    Pm = (diag([1 1 1]) - K * C) * P_prev;
    %% TODO - zlinearyzować model dyskretny z wykorzystaniem stanu mierzonego
-%     [A B C] = linearize_kalman(x(:,k), uk(:,k-1),R,L,Tp);
+
+    if strcmp(typ,"mierzony")
+        [A B C] = linearize_kalman(xk(:,k), uk(:,k-1),R,L,Tp);
+    end
+
  
    %% TODO - zlinearyzować model dyskretny z wykorzystaniem stanu estymnowanego
-    [A B C] = linearize_kalman(x_est(:,k), uk(:,k-1),R,L,Tp);
+   if strcmp(typ,"estymowany")
+        [A B C] = linearize_kalman(x_est(:,k), uk(:,k-1),R,L,Tp);
+   end
     
    %% TODO - wyznaczyć macierze P oraz Cf
     
    %% TODO - wyznaczyć zakłócenie v(k) dla stanu mierzonego
+    if strcmp(typ,"mierzony")
+        x_mod = simulate_proces_single(xk(:, k), uk(:, k-1), Tp, R, L);
+        vk = xk(:,k) - x_mod;   
+    end
 
    %% TODO - wyznaczyć zakłócenie v(k) dla stanu estomowanego
 
+    if strcmp(typ,"estymowany")
+        x_mod = simulate_proces_single(x_est(:, k), uk(:, k-1), Tp, R, L);
+        vk = xk(:,k) - x_mod;
+    end
+
    %% TODO - wyznaczyć d(k) na podstawie nieliniowego modelu dyskretnego
-   
+  
+%    dk = yk(:,k)-ymod
    %% TODO - wyznaczyć trajektorię swobodną x0 na podsatawie nieliniowego 
    % modelu dyskretnego -- stan mierzony
-  
+%   xotraj(:,1) = model_niel_dyskretny_x(xk(:,k),uk(:,k-1))+vk;
  
    %% TODO - wyznaczyć trajektorię swobodną x0 na podstawie nieliniowego 
    % modelu dyskretnego -- stan estymowany
@@ -101,8 +125,14 @@ for k = kmin:kmax
 
    %% TODO - wyznaczyć trajektorię swobodną y0 
     y_zad_v = get_yzad(k, y_zad, N, nx);
-    y_0_v = get_y0_v(N, ny, x_est, uk, Tp, R, L, k);
 
+
+    if strcmp(typ,"mierzony")
+       y_0_v = get_y0_v(N, ny, xk, uk, Tp, R, L, k, vk);
+    end
+    if strcmp(typ,"estymowany")
+       y_0_v = get_y0_v(N, ny, x_est, uk, Tp, R, L, k, vk);
+    end
    %% TODO - wyznaczyć wartości zadane na horyzoncie N 
     M = get_M_matrix(A, B, nx, nu, Nu, N);
     C_dash = diag(ones(1, N*nx));
@@ -120,10 +150,50 @@ for k = kmin:kmax
    if uk(2,k)<-10
        uk(2,k) = -10;
    end
+   if uk(1,k)>10
+       uk(1,k) = 10;
+   end
+   if uk(2,k)>10
+       uk(2,k) = 10;
+   end
+   k
 end
+
+xk = xk(:, 1:end-N);
+y_zad = y_zad(:, 1:end-N);
+
+
+
+% plot_scale = 25/0.7;
+% w = 0.002*10*plot_scale;
+% h = 0.003*plot_scale*3;
+% x_p = 0;
+% y_p = 0;
+% for i = 1:length(xk)
+%     plot(y_zad(1, :), y_zad(2, :), 'b', 'LineWidth', 2);
+%     hold on
+%     plot(xk(1, 1:i), xk(2, 1:i), 'r--','LineWidth', 1.5);
+%     x_p = xk(1, i) -w/2;
+%     y_p = xk(2, i) - h/2;
+%     t_p = xk(3, i);
+%     rectangle('Position', [x_p y_p, w  h], 'EdgeColor', 'k', 'FaceColor','g');
+%     p1 = [x_p + w/2 y_p + h/2];
+%     arrow_len = 0.03*plot_scale;
+%     p2 = [x_p + w/2  + arrow_len*cos(t_p) y_p + h/2 + arrow_len*sin(t_p)];      
+%     dp = p2-p1;                       
+%     quiver(p1(1),p1(2),dp(1),dp(2),0,'m','LineWidth', 2)
+%     drawnow
+%     rectangle('Position', [x_p y_p, w  h], 'EdgeColor','w', 'FaceColor','w')
+%     quiver(p1(1),p1(2),dp(1),dp(2),0,'w','LineWidth', 2)
+% 
+% end
+
 
 %% TODO wyznaczyc błąd średniokwadratowy
 
+err1 = immse(xk(1, :),y_zad(1, :))
+err2 = immse(xk(2, :),y_zad(2, :))
+err3 = immse(xk(3, :),y_zad(3, :))
 %% TODO -- wykresy
 
 % wykres 1 - u(t)
@@ -133,18 +203,59 @@ end
 % wykres 3 - trajektria robota na płaszczyźnie
 
 % wykres 4 - stan estymowany robota w porównaniu do stanu mierzonego
-
-figure
-plot(x(1, :), x(2, :), 'LineWidth', 1.5);
-hold on;
-plot(x_est(1, :), x_est(2, :), 'o','LineWidth', 1.5);
-plot(y_zad(1, :), y_zad(2, :), '--', 'LineWidth', 1.5);
+figure()
+subplot(3,1,1);
+plot(xk(1,:));
 grid on;
+title('Stan mierzony i estymowany')
+hold on;
+plot(x_est(1,:), '--');
+subplot(3,1,2);
+plot(xk(2,:));
+grid on;
+hold on;
+plot(x_est(2,:), '--');
+subplot(3,1,3);
+plot(xk(3,:));
+grid on;
+hold on;
+plot(x_est(3,:), '--');
+grid on;
+
 
 figure;
 plot(uk(1, :))
+grid on;
+title('Sterowanie')
 hold on;
 plot(uk(2, :), '--')
+grid on;
+
+figure()
+subplot(3,1,1);
+plot(xk(1,:));
+grid on;
+title('Yzad i Y')
+hold on;
+plot(y_zad(1,:), '--');
+subplot(3,1,2);
+plot(xk(2,:));
+grid on;
+hold on;
+plot(y_zad(2,:), '--');
+subplot(3,1,3);
+plot(xk(3,:));
+grid on;
+hold on;
+plot(y_zad(3,:), '--');
+
+figure;
+plot(xk(1,:), xk(2, :), 'LineWidth', 2)
+grid on;
+title('Trajektoria')
+hold on;
+plot(y_zad(1,:), y_zad(2, :), '--', 'LineWidth', 2)
+grid on;
 
 %% Funkcje - dobrze jest długie, bądź też często powtarzające się
 % fragmenty kodu zawrzeć w funkcjach
